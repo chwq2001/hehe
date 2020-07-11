@@ -10,9 +10,10 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
-import java.sql.Connection;
-import java.sql.Statement;
+import java.sql.*;
+import java.util.HashMap;
 import java.util.Hashtable;
+import java.util.Map;
 
 public class TestFrame extends JFrame {
 	private TestFrame myself = this;
@@ -22,8 +23,8 @@ public class TestFrame extends JFrame {
 	private JButton btnCommit;
 	private JButton btnClear;
 	private JButton btnExit;
-	
-	
+
+
 
 //	private static Hashtable<String, String> ht=new Hashtable<String, String>();
 	
@@ -82,7 +83,7 @@ public class TestFrame extends JFrame {
 
 		try {
 			String systemLookAndFeelClassName = UIManager.getSystemLookAndFeelClassName();
-			System.out.println("LookAndFeel: "+systemLookAndFeelClassName);
+//			System.out.println("LookAndFeel: "+systemLookAndFeelClassName);
 			UIManager.setLookAndFeel(systemLookAndFeelClassName);
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -96,7 +97,7 @@ public class TestFrame extends JFrame {
 		cmbDatasource.addItem(new DatasourceConfig("sales uat",    	"t3://10.100.137.185:8001/sales/", "salesDataSource"));
 		cmbDatasource.addItem(new DatasourceConfig("sales prod",    "t3://10.80.33.38:8001/sales/",    "salesDataSource"));
 //		cmbDatasource.addItem(new DatasourceConfig("banksales uat", "t3://10.100.137.192:8001/sales/", "salesDataSource"));
-//		cmbDatasource.addItem(new DatasourceConfig("banksales prod","t3://10.100.7.26:8001/sales/",    "salesDataSource"));
+		cmbDatasource.addItem(new DatasourceConfig("banksales prod","t3://10.80.35.18:8001/sales/",    "salesDataSource"));
 //		cmbDatasource.addItem(new DatasourceConfig("newbiz test",    "t3://10.100.135.168:7001", "sinosoftDataSource"));
 //		cmbDatasource.addItem(new DatasourceConfig("newbiz uat",    "t3://10.100.137.168:8001", "sinosoftDataSource"));
 //		cmbDatasource.addItem(new DatasourceConfig("newbiz prod",   "t3://10.100.6.28:8001", "sinosoftDataSource"));
@@ -111,6 +112,7 @@ public class TestFrame extends JFrame {
 	
 	private void addListners() {
 		btnTry.addActionListener(new ActionListener() {
+			@Override
 			public void actionPerformed(ActionEvent e) {
 				onClickRun();
 			}
@@ -160,14 +162,22 @@ public class TestFrame extends JFrame {
 		});
 	}
 
-	private String excuteSql( boolean needCommit) throws Exception {
+	private Map excuteSql( boolean needCommit) throws Exception {
 		String txtSqls = txtSql.getText();
+		Map retMap = new HashMap(3);
 		if (txtSqls.trim().length()==0) {
-			return "no sql";
+			retMap.put("resutlStr","no sql");
+			return retMap;
 		}
-		String[] sqls = txtSqls.split(";");
+		String splitStr = ";";
+		if (txtSqls.indexOf(";;")>0) {
+			splitStr = ";;";
+		}
+
+		String[] sqls = txtSqls.split(splitStr);
 		if (sqls==null || sqls.length==0) {
-			return "no sql";
+			retMap.put("resutlStr","no sql");
+			return retMap;
 		}
 		Connection connection = getConnection();
 		boolean autoCommit = connection.getAutoCommit();
@@ -175,6 +185,7 @@ public class TestFrame extends JFrame {
 		Statement stmt = null;
 		StringBuffer buf = new StringBuffer();
 		int[] result = null;
+
 		try {
 			for (int i=0; i<sqls.length; i++) {
 				if ( sqls[i]==null) {
@@ -184,17 +195,40 @@ public class TestFrame extends JFrame {
 				if (sql.length()==0) {
 					continue;
 				}
-				String tmpSql = sql.toLowerCase();
-				tmpSql = tmpSql.replace('\n', ' ');
-				if ( (tmpSql.indexOf("update ")>=0 && tmpSql.indexOf(" where ")<0)
-						|| (tmpSql.indexOf("delete ")>=0 && tmpSql.indexOf(" where ")<0) ) {
+
+				StringBuilder builderLine = new StringBuilder();
+				String[] lines = sql.split("\n");
+				for (String aLine : lines) {
+					aLine = aLine.trim();
+					if (aLine.length()==0) {
+						continue;
+					}
+					int commentStrIndex = aLine.indexOf("--");
+					if (commentStrIndex>=0) {
+						builderLine.append(aLine, 0, commentStrIndex);
+					}
+					else {
+						builderLine.append(aLine);
+					}
+					builderLine.append(" ");
+				}
+
+				String tmpSql = builderLine.toString().trim();
+				if (tmpSql.length()==0) {
+					continue;
+				}
+//				JOptionPane.showMessageDialog(myself,tmpSql);
+				String lowcaseTmpSql = tmpSql.toLowerCase();
+				if ( (lowcaseTmpSql.indexOf("update ")>=0 && lowcaseTmpSql.indexOf(" where ")<0)
+						|| (lowcaseTmpSql.indexOf("delete ")>=0 && lowcaseTmpSql.indexOf(" where ")<0) ) {
 					throw new Exception("no where clause");
 				}
+
 				if (stmt==null) {
 					stmt = connection.createStatement();
 				}
-				
-				stmt.addBatch(sql);
+				stmt.addBatch(tmpSql);
+				sqls[i]=tmpSql;
 			}
 			result = stmt.executeBatch();
 			if (needCommit) {
@@ -219,8 +253,11 @@ public class TestFrame extends JFrame {
 				buf.append(i).append(", ").append(++k%20==0?"\n":"");
 			}
 		}
-		
-		return buf.toString();
+
+		retMap.put("resutlStr",buf.toString());
+		retMap.put("sqls",sqls);
+		retMap.put("sqlresults",result);
+		return retMap;
 
 	}
 	
@@ -254,7 +291,8 @@ public class TestFrame extends JFrame {
 					return ;
 				}
 			}
-			JOptionPane.showMessageDialog(myself, "try done!,result: " + excuteSql(false));
+			Map resultMap = excuteSql(false);
+			JOptionPane.showMessageDialog(myself, "try done!,result: " + resultMap.get("resutlStr"));
 			isTry = true;
 		} catch (Exception ex) {
 			isTry = false;
@@ -285,14 +323,49 @@ public class TestFrame extends JFrame {
 				JOptionPane.showMessageDialog(myself, "Please try first, pay attention to involved rows!","Do",JOptionPane.ERROR_MESSAGE);
 				return;
 			}
-			JOptionPane.showMessageDialog(myself, "do done!,result: " + excuteSql(true));
+			Map resultMap = excuteSql(true);
+			JOptionPane.showMessageDialog(myself, "try done!,result: " + resultMap.get("resutlStr"));
 			isTry = false;
+//			logSql( (String[]) resultMap.get("sqls"), (int [])resultMap.get("sqlresults"));
 		} catch (Exception ex) {
 			JOptionPane.showMessageDialog(myself, ex.getMessage());
 			isTry = false;
 		}
 	}
-	
+
+	private void logSql(String[] sqls, int[] sqlresults) {
+		if (sqls==null || sqlresults==null || sqlresults.length!=sqls.length) {
+			return ;
+		}
+		Connection connection = null;
+		PreparedStatement pstmt = null;
+		try {
+			connection = getLogConnection();
+			pstmt = connection.prepareStatement("insert into hehe (SQLSTR,SQLRES,RUNDATE) values(?,?,?)");
+			for (int i = 0; i < sqls.length; i++) {
+				pstmt.setString(1,sqls[i]);
+				pstmt.setString(2,"" + sqlresults[i]);
+				pstmt.setTimestamp(3,new Timestamp(System.currentTimeMillis()));
+				pstmt.addBatch();
+			}
+			pstmt.executeBatch();
+			connection.commit();
+		} catch (Exception e) {
+			try {connection.rollback();} catch (Exception ex) {}
+			e.printStackTrace();
+		} finally {
+			closeDB(connection,pstmt);
+		}
+
+	}
+
+	private Connection getLogConnection() throws Exception{
+		DatasourceConfig config = new DatasourceConfig("newsales dev",    "t3://10.100.134.13:8001/", "FMS");
+		Context context = new InitialContext(config.getJndiContext());
+		javax.sql.DataSource ds = (javax.sql.DataSource) context.lookup(config.getDatasourceName());
+		Connection connection = ds.getConnection();
+		return connection;
+	}
 	private void onClickClear() {
 		if ("".equals(txtSql.getText())) {
 			cmbDatasource.setSelectedIndex(0);
@@ -315,7 +388,7 @@ class DatasourceConfig {
 		this.name = name;
 		this.providerUrl = providerUrl;
 		this.dataSourceName = dataSourceName;
-		ht.put(Context.INITIAL_CONTEXT_FACTORY,INITIAL_CONTEXT_FACTORY); 
+		ht.put(Context.INITIAL_CONTEXT_FACTORY,INITIAL_CONTEXT_FACTORY);
 		ht.put(Context.PROVIDER_URL, providerUrl); 
 	}
 	
